@@ -6,6 +6,8 @@
 ## Version: 1.0
 ## Category: User Interface
 ## Category-enUS: User Interface
+## X-Curse-Project-ID: 1773434
+## X-Website: https://github.com/zecmo/HideAnnoyingPopups
 ## X-License: MIT
 ## SavedVariables: HideAnnoyingPopupsDB
 
