@@ -22,6 +22,18 @@ hooksecurefunc = function(n,f) hooks[n]=f end
 StaticPopup_Show = function() end
 StaticPopupDialogs = { TALENT_THING = { text = "Learn these talents?" } }
 local onEvent
+-- the garrison Call to Arms button lives in ZoneAbilityFrame
+local zoneShown, zoneHides, zoneOnShow = true, 0, nil
+ZoneAbilityFrame = {
+  IsShown = function() return zoneShown end,
+  Hide = function() zoneShown = false; zoneHides = zoneHides + 1 end,
+  Show = function() zoneShown = true end,
+  HookScript = function(_, _, f) zoneOnShow = f end,
+}
+local abilities = { { spellID = 161691 } }
+C_ZoneAbility = { GetActiveAbilities = function() return abilities end }
+local inCombat = false
+InCombatLockdown = function() return inCombat end
 CreateFrame = function() return {
   RegisterEvent=function() end, UnregisterEvent=function() end,
   SetScript=function(_,_,f) onEvent=f end,
@@ -149,6 +161,8 @@ fire("ADDON_LOADED", "HideAnnoyingPopups")
 
 ok("options panel is registered", panelCaptured ~= nil)
 
+-- bump when a rule is added to core.lua
+local RULE_COUNT = 3
 local checks, rowFrames = {}, {}
 for _, w in ipairs(created) do
   if w.kind == "CheckButton" then checks[#checks+1] = w end
@@ -156,7 +170,13 @@ for _, w in ipairs(created) do
     rowFrames[#rowFrames+1] = w
   end
 end
-ok("  one checkbox per rule", #checks == 2, "got "..#checks)
+ok("  one checkbox per rule", #checks == RULE_COUNT, "got "..#checks)
+
+-- reloading with the Settings window open never fires OnShow, so the boxes
+-- have to carry the saved state from birth
+local seeded = 0
+for _, c in ipairs(checks) do if c:GetChecked() then seeded = seeded + 1 end end
+ok("  boxes seeded without waiting for OnShow", seeded == RULE_COUNT, "checked "..seeded)
 
 -- what was asked for: the box comes first, the title is anchored to its right
 local boxFirst = 0
@@ -166,7 +186,7 @@ for _, w in ipairs(created) do
        and pt[3] == "RIGHT" then boxFirst = boxFirst + 1 end
   end
 end
-ok("  checkbox sits to the LEFT of its title", boxFirst == 2, "matched "..boxFirst)
+ok("  checkbox sits to the LEFT of its title", boxFirst == RULE_COUNT, "matched "..boxFirst)
 
 ok("  laying out on show does not error", pcall(function() panelCaptured.scripts.OnShow() end))
 
@@ -186,7 +206,7 @@ local bigFonts = 0
 for _, w in ipairs(created) do
   if w.font and w.font.name == "GameFontNormalMed1" then bigFonts = bigFonts + 1 end
 end
-ok("  row titles use the larger font", bigFonts == 2, "got "..bigFonts)
+ok("  row titles use the larger font", bigFonts == RULE_COUNT, "got "..bigFonts)
 
 local divs = 0
 for _, w in ipairs(created) do if w.kind == "texture" then divs = divs + 1 end end
@@ -277,6 +297,40 @@ cmd("status")
 local st = table.concat(chat,"\n"):gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r","")
 ok("/hap status still lists the rules",
    st:find("Login / Reload Popup", 1, true) and st:find("Island Expeditions Popup", 1, true), st)
+
+-- Frame rule: the Draenor garrison Call to Arms button
+ok("garrison button hidden on load", zoneHides >= 1, "hides "..zoneHides)
+
+zoneShown = true; abilities = { { spellID = 999999 } }
+local hidesBefore = zoneHides
+fire("ZONE_CHANGED_NEW_AREA")
+ok("  another zone ability is left alone",
+   zoneHides == hidesBefore and zoneShown == true, "hides "..zoneHides)
+
+abilities = { { spellID = 161691 } }
+fire("ZONE_CHANGED_NEW_AREA")
+ok("  the garrison one is hidden", zoneShown == false)
+
+-- hiding a frame that owns secure buttons is blocked in combat
+zoneShown = true; inCombat = true
+fire("ZONE_CHANGED_NEW_AREA")
+ok("  left alone during combat", zoneShown == true)
+inCombat = false
+fire("PLAYER_REGEN_ENABLED")
+ok("  hidden once combat ends", zoneShown == false)
+
+zoneShown = true
+if zoneOnShow then zoneOnShow() end
+ok("  a Blizzard re-show is caught", zoneShown == false)
+
+-- unticking the box has to give the button back
+local gBox = checks[RULE_COUNT]
+gBox:SetChecked(false)
+gBox.scripts.OnClick(gBox)
+ok("  unticking restores it", zoneShown == true, "shown="..tostring(zoneShown))
+gBox:SetChecked(true)
+gBox.scripts.OnClick(gBox)
+ok("  reticking hides it again", zoneShown == false, "shown="..tostring(zoneShown))
 
 print = SAY
 SAY(""); SAY(string.format("%d passed, %d failed", pass, fail))

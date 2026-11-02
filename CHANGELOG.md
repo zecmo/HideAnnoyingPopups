@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1
+- Hides the Draenor garrison "Call to Arms" button, which no amount of dragging
+  to an action bar will remove
+- Only while the garrison ability is the active one, so other zone abilities
+  are untouched
+- Deferred out of combat, since hiding a frame that owns secure buttons mid-fight
+  would raise the blocked-action error this addon exists to suppress
+
 ## 1.0
 - First release
 - Hides the "blocked from an action only available to the Blizzard UI" popup

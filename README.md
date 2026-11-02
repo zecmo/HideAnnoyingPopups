@@ -20,6 +20,20 @@ across 7 addons and 146 distinct calls — ConsolePort_Bar alone accounted for
 It keeps counting while it hides, so you still get the diagnostic — which
 addon, which call, how many times — without the interruption.
 
+### The Draenor garrison "Call to Arms" button
+
+The garrison zone ability parks itself on screen permanently. Dragging it to
+an action bar fills the slot but leaves the floating button where it was, and
+there is no Edit Mode toggle for it. It is ten-year-old content.
+
+It lives in `ZoneAbilityFrame`, which is shared with current-expansion zone
+abilities, so this hides the frame **only while the garrison ability is the
+active one** — spell 161691. Anything else that uses that slot is left alone.
+
+Hiding waits until you are out of combat. The frame owns secure buttons, and
+hiding one mid-fight raises exactly the blocked-action error this addon exists
+to suppress.
+
 ### The stray "leave instance group?" prompt
 
 Entering an instance — Island Expeditions especially — can raise this on its

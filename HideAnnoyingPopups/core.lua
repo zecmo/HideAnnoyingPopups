@@ -3,8 +3,10 @@
 Popups that interrupt you for no good reason, each behind its own checkbox.
 
 Adding another is deliberately a data change, not a code change: append an
-entry to RULES below. A rule says which StaticPopup to dismiss, and may carry
-a guard deciding whether this particular appearance is the annoying one.
+entry to RULES below. A popup rule says which StaticPopup to dismiss, and may
+carry a guard deciding whether this particular appearance is the annoying one.
+A frame rule names a frame to hide instead, with an `active` test so a shared
+frame is only hidden while it is showing the unwanted thing.
 
 Dismissing only ever closes a dialog. It never presses a button, so it cannot
 answer Yes, leave a group, or spend anything on your behalf.
@@ -79,6 +81,22 @@ end
 --------------------------------------------------------------------------
 -- Rules. Add a popup here; everything else follows.
 --------------------------------------------------------------------------
+-- The Draenor garrison parks a permanent ability button in ZoneAbilityFrame.
+-- The slot is shared with current-expansion abilities, so the rule checks
+-- which spell is actually active rather than hiding the frame outright.
+-- 161691 is "Garrison Ability"; the button itself reads "Call to Arms".
+local GARRISON_ABILITY = 161691
+
+local function GarrisonAbilityActive()
+    if not (C_ZoneAbility and C_ZoneAbility.GetActiveAbilities) then return false end
+    local ok, list = pcall(C_ZoneAbility.GetActiveAbilities)
+    if not ok or type(list) ~= "table" then return false end
+    for _, a in ipairs(list) do
+        if a and a.spellID == GARRISON_ABILITY then return true end
+    end
+    return false
+end
+
 local RULES = {
     {
         key     = "blocked",
@@ -102,10 +120,20 @@ local RULES = {
         default = true,
         guard   = OneShotWhileArmed,
     },
+    {
+        key     = "garrisonability",
+        frame   = "ZoneAbilityFrame",
+        active  = GarrisonAbilityActive,
+        name    = "Garrison Ability",
+        title   = "\"Call to Arms\"",
+        desc    = "The Draenor garrison ability button, parked on screen forever."
+                  .. "\nNah, I do not want it on my action bar.",
+        default = true,
+    },
 }
 
 local byPopup = {}
-for _, r in ipairs(RULES) do byPopup[r.popup] = r end
+for _, r in ipairs(RULES) do if r.popup then byPopup[r.popup] = r end end
 
 --------------------------------------------------------------------------
 
@@ -238,6 +266,56 @@ local function ApplyEventRules()
     end
 end
 
+-- Frame rules hide a frame rather than dismissing a dialog. Two cautions
+-- shape this: a frame owning secure buttons cannot be hidden in combat
+-- without raising the very blocked-action error this addon exists to swallow,
+-- so that is deferred; and unchecking the box has to give the frame back,
+-- which means remembering that we were the one who hid it.
+local hiddenByUs, pendingFrameApply = {}, false
+
+local function ApplyFrameRules()
+    for _, r in ipairs(RULES) do
+        local frame = r.frame and _G[r.frame]
+        if frame then
+            local want = Setting(r) and (not r.active or r.active())
+            if want then
+                if frame:IsShown() then
+                    if InCombatLockdown and InCombatLockdown() then
+                        pendingFrameApply = true
+                    else
+                        frame:Hide()
+                        hiddenByUs[r.frame] = true
+                        Tally(r)
+                    end
+                end
+            elseif hiddenByUs[r.frame] then
+                hiddenByUs[r.frame] = nil
+                if not (InCombatLockdown and InCombatLockdown()) then frame:Show() end
+            end
+        end
+    end
+end
+
+-- Blizzard shows the frame again on its own schedule, so catch it at OnShow
+-- as well. Deferred by a frame: hiding something from inside its own OnShow
+-- runs during layout, and a zero-delay timer steps clear of that.
+local hookedFrames = {}
+local function HookFrameRules()
+    for _, r in ipairs(RULES) do
+        local frame = r.frame and not hookedFrames[r.frame] and _G[r.frame]
+        if frame and frame.HookScript then
+            hookedFrames[r.frame] = true
+            frame:HookScript("OnShow", function()
+                if C_Timer and C_Timer.After then
+                    C_Timer.After(0, ApplyFrameRules)
+                else
+                    ApplyFrameRules()
+                end
+            end)
+        end
+    end
+end
+
 -- A queue popping is the moment the stray prompt appears, so the hard events
 -- arm the leave guard exactly as a zone change does. The soft ones repeat
 -- while you sit in a queue, which is what covers a long wait. Registered
@@ -249,6 +327,8 @@ local TAINT = { ADDON_ACTION_FORBIDDEN = true, ADDON_ACTION_BLOCKED = true }
 
 f:RegisterEvent("ADDON_LOADED")
 f:RegisterEvent("PLAYER_ENTERING_WORLD")
+f:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+f:RegisterEvent("PLAYER_REGEN_ENABLED")
 for ev in pairs(ARM_HARD) do pcall(f.RegisterEvent, f, ev) end
 for ev in pairs(ARM_SOFT) do pcall(f.RegisterEvent, f, ev) end
 f:SetScript("OnEvent", function(self, event, a1, a2)
@@ -277,11 +357,29 @@ f:SetScript("OnEvent", function(self, event, a1, a2)
         end
 
         ApplyEventRules()
+        HookFrameRules()
+        ApplyFrameRules()
+        return
+    end
+
+    if event == "ZONE_CHANGED_NEW_AREA" then
+        HookFrameRules()
+        ApplyFrameRules()
+        return
+    end
+
+    if event == "PLAYER_REGEN_ENABLED" then
+        if pendingFrameApply then
+            pendingFrameApply = false
+            ApplyFrameRules()
+        end
         return
     end
 
     if event == "PLAYER_ENTERING_WORLD" then
         Arm(true)
+        HookFrameRules()
+        ApplyFrameRules()
         trace("entering", State() .. " -> armed "
             .. tostring(tonumber(db.window) or 120) .. "s")
         return
@@ -412,6 +510,7 @@ local function BuildOptions()
                 SetSetting(r, on)
                 box:SetChecked(on)
                 ApplyEventRules()
+                ApplyFrameRules()
             end
             box:SetScript("OnClick", function(self) Toggle(self:GetChecked() and true or false) end)
             row:SetScript("OnClick", function() Toggle(not Setting(r)) end)
@@ -463,6 +562,12 @@ local function BuildOptions()
 
         panel:SetScript("OnShow", function() Refresh() Layout() end)
         panel:SetScript("OnSizeChanged", Layout)
+
+        -- A frame is shown from the moment it is created, so a panel Blizzard
+        -- parents into an already-open Settings window -- a /reload with the
+        -- options screen up -- never fires OnShow. Seed the boxes now rather
+        -- than relying on a show that may never come.
+        Refresh()
 
         -- Do not assign category.ID here. Blizzard registers the category under
         -- the id it generated, so overwriting it makes GetID return a key that

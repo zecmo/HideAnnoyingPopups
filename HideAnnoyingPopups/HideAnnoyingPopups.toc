@@ -3,7 +3,7 @@
 ## IconTexture: Interface/Addons/HideAnnoyingPopups/art/HideAnnoyingPopups_small_icon
 ## Notes: |cff58C6FADismisses popups that interrupt you for no good reason.|r|n|cffbbbbbbBy zecmo|r|n|n|cffFFC700Each popup is its own checkbox: Options > AddOns > Hide Annoying Popups, or /hap|r
 ## Author: zecmo
-## Version: 1.0
+## Version: 1.1
 ## Category: User Interface
 ## Category-enUS: User Interface
 ## X-Curse-Project-ID: 1773434
